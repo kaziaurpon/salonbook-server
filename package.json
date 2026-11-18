@@ -8,8 +8,6 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@better-auth/mongo-adapter": "^1.7.26",
-    "better-auth": "^1.7.26",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
