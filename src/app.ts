@@ -3,6 +3,8 @@ import express from "express";
 import helmet from "helmet";
 import { requireAuth, requireRole } from "./middleware/auth.js";
 import { servicesRouter } from "./routes/services.js";
+import { adminServicesRouter } from "./routes/admin-services.js";
+import { adminAppointmentsRouter, appointmentsRouter } from "./routes/appointments.js";
 
 export const app = express();
 
@@ -14,6 +16,9 @@ app.use(cors({
 app.use(express.json());
 
 app.use("/api/services", servicesRouter);
+app.use("/api/admin/services", adminServicesRouter);
+app.use("/api/appointments", appointmentsRouter);
+app.use("/api/admin/appointments", adminAppointmentsRouter);
 
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "salonbook-api" });

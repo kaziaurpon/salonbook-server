@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { isValidObjectId } from "mongoose";
 import { Service } from "../models/service.js";
+import { requireAuth } from "../middleware/auth.js";
 
 export const servicesRouter = Router();
 
@@ -45,7 +46,7 @@ servicesRouter.get("/", async (request, response) => {
   response.json({ services, page, limit, total, pages: Math.ceil(total / limit) });
 });
 
-servicesRouter.get("/:id", async (request, response) => {
+servicesRouter.get("/:id", requireAuth, async (request, response) => {
   if (!isValidObjectId(request.params.id)) {
     response.status(400).json({ message: "This service link is not valid." });
     return;
