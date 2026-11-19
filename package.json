@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "seed:services": "tsx scripts/seed-services.ts",
+    "refresh:service-images": "tsx scripts/seed-services.ts --refresh-images"
   },
   "dependencies": {
     "cors": "^2.8.5",
