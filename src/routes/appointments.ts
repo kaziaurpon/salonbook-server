@@ -245,18 +245,34 @@ appointmentsRouter.patch("/:id/cancel", ...customerOnly, async (request, respons
   response.json({ appointment, message: "Appointment request cancelled." });
 });
 
-adminAppointmentsRouter.get("/", ...adminOnly, async (_request, response) => {
-  const appointments = await Appointment.find()
-    .populate("serviceId", "serviceName category image")
-    .sort({ appointmentDate: -1, createdAt: -1 })
-    .lean();
+adminAppointmentsRouter.get("/", ...adminOnly, async (request, response) => {
+  const rawPage = Number(request.query.page || 1);
+  const rawLimit = Number(request.query.limit || 10);
+  const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
+  const limit = Number.isFinite(rawLimit) ? Math.min(30, Math.max(1, Math.floor(rawLimit))) : 10;
+  const [appointments, total, pending, confirmed, cancelled] = await Promise.all([
+    Appointment.find()
+      .populate("serviceId", "serviceName category image")
+      .sort({ appointmentDate: -1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Appointment.countDocuments(),
+    Appointment.countDocuments({ status: "pending" }),
+    Appointment.countDocuments({ status: "confirmed" }),
+    Appointment.countDocuments({ status: "cancelled" }),
+  ]);
   const ids = [...new Set(appointments.map((appointment) => appointment.customerId))];
   const idCandidates = ids.flatMap((id) => mongoose.isValidObjectId(id)
     ? [id, new mongoose.Types.ObjectId(id)]
     : [id]);
   const users = await AuthUser.find({ _id: { $in: idCandidates } }).lean();
   const usersById = new Map(users.map((user) => [String(user._id), { id: String(user._id), name: user.name, email: user.email, image: user.image }]));
-  response.json({ appointments: appointments.map((appointment) => ({ ...appointment, customer: usersById.get(appointment.customerId) || null })) });
+  response.json({
+    appointments: appointments.map((appointment) => ({ ...appointment, customer: usersById.get(appointment.customerId) || null })),
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    totals: { total, pending, confirmed, cancelled },
+  });
 });
 
 adminAppointmentsRouter.patch("/:id/status", ...adminOnly, async (request, response) => {

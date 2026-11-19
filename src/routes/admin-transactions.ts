@@ -8,8 +8,15 @@ import { Transaction } from "../models/transaction.js";
 export const adminTransactionsRouter = Router();
 adminTransactionsRouter.use(requireAuth, requireRole("admin"));
 
-adminTransactionsRouter.get("/", async (_request, response) => {
-  const transactions = await Transaction.find().sort({ createdAt: -1 }).lean();
+adminTransactionsRouter.get("/", async (request, response) => {
+  const rawPage = Number(request.query.page || 1);
+  const rawLimit = Number(request.query.limit || 12);
+  const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
+  const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, Math.floor(rawLimit))) : 12;
+  const [transactions, total] = await Promise.all([
+    Transaction.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Transaction.countDocuments(),
+  ]);
   const appointmentIds = transactions.map((item) => item.appointmentId);
   const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
     .select("_id appointmentDate timeSlot serviceId")
@@ -27,5 +34,5 @@ adminTransactionsRouter.get("/", async (_request, response) => {
     status: String(item.status) === "succeeded" ? "paid" : item.status,
     appointment: appointmentsById.get(String(item.appointmentId)) || null,
     customer: usersById.get(item.customerId) || null,
-  })) });
+  })), pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
 });
