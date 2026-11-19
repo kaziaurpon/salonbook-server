@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isValidObjectId } from "mongoose";
+import mongoose, { isValidObjectId } from "mongoose";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { Appointment, APPOINTMENT_TIME_SLOTS } from "../models/appointment.js";
@@ -116,8 +116,11 @@ adminAppointmentsRouter.get("/", ...adminOnly, async (_request, response) => {
     .sort({ appointmentDate: -1, createdAt: -1 })
     .lean();
   const ids = [...new Set(appointments.map((appointment) => appointment.customerId))];
-  const users = await AuthUser.find({ _id: { $in: ids } }).lean();
-  const usersById = new Map(users.map((user) => [user._id, { id: user._id, name: user.name, email: user.email, image: user.image }]));
+  const idCandidates = ids.flatMap((id) => mongoose.isValidObjectId(id)
+    ? [id, new mongoose.Types.ObjectId(id)]
+    : [id]);
+  const users = await AuthUser.find({ _id: { $in: idCandidates } }).lean();
+  const usersById = new Map(users.map((user) => [String(user._id), { id: String(user._id), name: user.name, email: user.email, image: user.image }]));
   response.json({ appointments: appointments.map((appointment) => ({ ...appointment, customer: usersById.get(appointment.customerId) || null })) });
 });
 

@@ -1,7 +1,7 @@
 import mongoose, { Schema } from "mongoose";
 
 export interface AuthUserRecord {
-  _id: string;
+  _id: string | mongoose.Types.ObjectId;
   name: string;
   email: string;
   image?: string | null;
@@ -11,7 +11,9 @@ export interface AuthUserRecord {
 
 const authUserSchema = new Schema<AuthUserRecord>(
   {
-    _id: { type: String, required: true },
+    // The official Better Auth Mongo adapter may store the Mongo-generated _id
+    // as an ObjectId while exposing it as a string in auth sessions and JWTs.
+    _id: { type: Schema.Types.Mixed, required: true },
     name: { type: String, required: true },
     email: { type: String, required: true },
     image: { type: String, default: null },

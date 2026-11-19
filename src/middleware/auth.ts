@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import mongoose from "mongoose";
 import { AuthUser, type AuthUserRecord } from "../models/auth-user.js";
 
 declare global {
@@ -50,7 +51,9 @@ export async function requireAuth(request: Request, response: Response, next: Ne
       return;
     }
 
-    const currentUser = await AuthUser.findById(id).lean<AuthUserRecord>();
+    const idCandidates: Array<string | mongoose.Types.ObjectId> = [id];
+    if (mongoose.isValidObjectId(id)) idCandidates.push(new mongoose.Types.ObjectId(id));
+    const currentUser = await AuthUser.findOne({ _id: { $in: idCandidates } }).lean<AuthUserRecord>();
     const currentRole = currentUser?.role ?? "customer";
     if (!currentUser || !["customer", "admin"].includes(currentRole)) {
       response.status(401).json({ message: "The account no longer exists." });
@@ -63,7 +66,7 @@ export async function requireAuth(request: Request, response: Response, next: Ne
     }
 
     request.authUser = {
-      id: currentUser._id,
+      id: String(currentUser._id),
       name: currentUser.name,
       email: currentUser.email,
       image: currentUser.image,
