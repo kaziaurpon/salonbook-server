@@ -17,6 +17,9 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
   credentials: true,
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Authorization", "Content-Type"],
+  optionsSuccessStatus: 204,
 }));
 // Stripe requires the unmodified request bytes when verifying its signature.
 app.post("/api/payments/webhook", express.raw({ type: "application/json", limit: "1mb" }), stripeWebhookHandler);

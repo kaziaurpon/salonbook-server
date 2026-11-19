@@ -24,6 +24,7 @@ adminTransactionsRouter.get("/", async (_request, response) => {
   const usersById = new Map(users.map((item) => [String(item._id), { name: item.name, email: item.email }]));
   response.json({ transactions: transactions.map((item) => ({
     ...item,
+    status: String(item.status) === "succeeded" ? "paid" : item.status,
     appointment: appointmentsById.get(String(item.appointmentId)) || null,
     customer: usersById.get(item.customerId) || null,
   })) });

@@ -6,7 +6,7 @@ export interface TransactionRecord {
   amount: number;
   currency: string;
   stripeSessionId: string;
-  status: "succeeded";
+  status: "paid" | "failed";
   createdAt: Date;
 }
 
@@ -17,7 +17,7 @@ const transactionSchema = new Schema<TransactionRecord>(
     amount: { type: Number, required: true, min: 0.01 },
     currency: { type: String, required: true, lowercase: true, minlength: 3, maxlength: 3 },
     stripeSessionId: { type: String, required: true, unique: true },
-    status: { type: String, enum: ["succeeded"], required: true },
+    status: { type: String, enum: ["paid", "failed"], required: true },
     createdAt: { type: Date, default: Date.now },
   },
   { versionKey: false },

@@ -72,7 +72,7 @@ export async function stripeWebhookHandler(request: Request, response: Response)
         amount: checkout.amount_total / 100,
         currency: checkout.currency,
         stripeSessionId: checkout.id,
-        status: "succeeded",
+        status: "paid",
       }], { session: mongoSession });
 
       appointment.paymentStatus = "paid";
