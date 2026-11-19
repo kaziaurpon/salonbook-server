@@ -15,6 +15,7 @@ export interface AppointmentRecord {
   paymentStatus: "unpaid" | "paid";
   status: "pending" | "confirmed" | "cancelled";
   slotKey?: string;
+  checkoutSessionId?: string;
   createdAt: Date;
 }
 
@@ -29,6 +30,7 @@ const appointmentSchema = new Schema<AppointmentRecord>(
     paymentStatus: { type: String, enum: ["unpaid", "paid"], default: "unpaid" },
     status: { type: String, enum: ["pending", "confirmed", "cancelled"], default: "pending", index: true },
     slotKey: { type: String, unique: true, sparse: true },
+    checkoutSessionId: { type: String, default: undefined },
     createdAt: { type: Date, default: Date.now },
   },
   { versionKey: false },

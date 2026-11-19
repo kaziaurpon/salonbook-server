@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 import { Appointment, APPOINTMENT_TIME_SLOTS } from "../models/appointment.js";
 import { Service } from "../models/service.js";
 import { AuthUser } from "../models/auth-user.js";
+import { getStripeClient } from "../lib/stripe.js";
 
 export const appointmentsRouter = Router();
 export const adminAppointmentsRouter = Router();
@@ -63,6 +64,122 @@ appointmentsRouter.get("/mine", ...customerOnly, async (request, response) => {
     .sort({ appointmentDate: -1, createdAt: -1 })
     .lean();
   response.json({ appointments });
+});
+
+appointmentsRouter.post("/:id/checkout", ...customerOnly, async (request, response) => {
+  if (!isValidObjectId(request.params.id)) {
+    response.status(400).json({ message: "This appointment ID is not valid." });
+    return;
+  }
+  const appointment = await Appointment.findOne({
+    _id: request.params.id,
+    customerId: request.authUser!.id,
+    status: "confirmed",
+    paymentStatus: "unpaid",
+  }).populate("serviceId", "serviceName");
+  if (!appointment) {
+    response.status(409).json({ message: "Only your own confirmed, unpaid appointment can be paid." });
+    return;
+  }
+
+  let stripe;
+  try {
+    stripe = getStripeClient();
+  } catch {
+    response.status(503).json({ message: "Stripe test mode is not configured on the server." });
+    return;
+  }
+
+  let expiredSessionId: string | undefined;
+  if (appointment.checkoutSessionId) {
+    try {
+      const existingSession = await stripe.checkout.sessions.retrieve(appointment.checkoutSessionId);
+      if (existingSession.status === "open" && existingSession.url) {
+        response.json({ url: existingSession.url });
+        return;
+      }
+      if (existingSession.status === "complete") {
+        response.status(409).json({ message: "Payment is processing. Refresh your appointments in a moment." });
+        return;
+      }
+      expiredSessionId = existingSession.id;
+    } catch {
+      response.status(502).json({ message: "Could not check the previous Stripe Checkout session." });
+      return;
+    }
+  }
+
+  const clientOrigin = (process.env.CLIENT_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
+  const serviceName = (appointment.serviceId as unknown as { serviceName?: string } | null)?.serviceName || "Salon appointment";
+  const amount = Math.round(appointment.servicePrice * 100);
+  if (!Number.isSafeInteger(amount) || amount < 1) {
+    response.status(400).json({ message: "The appointment price cannot be charged." });
+    return;
+  }
+
+  try {
+    const checkout = await stripe.checkout.sessions.create({
+      mode: "payment",
+      allowed_payment_method_types: ["card"],
+      client_reference_id: appointment.id,
+      customer_email: request.authUser!.email,
+      metadata: { appointmentId: appointment.id, customerId: request.authUser!.id },
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: "bdt",
+          unit_amount: amount,
+          product_data: { name: serviceName },
+        },
+      }],
+      success_url: `${clientOrigin}/payment/success?appointment_id=${appointment.id}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${clientOrigin}/payment/cancel?appointment_id=${appointment.id}`,
+    }, {
+      idempotencyKey: `salonbook-checkout:${appointment.id}:${expiredSessionId || "initial"}`,
+    });
+    if (!checkout.url) {
+      response.status(502).json({ message: "Stripe did not return a Checkout URL." });
+      return;
+    }
+
+    const sessionFilter = appointment.checkoutSessionId
+      ? { checkoutSessionId: appointment.checkoutSessionId }
+      : { checkoutSessionId: { $exists: false } };
+    const updated = await Appointment.findOneAndUpdate({
+      _id: appointment._id,
+      customerId: request.authUser!.id,
+      status: "confirmed",
+      paymentStatus: "unpaid",
+      ...sessionFilter,
+    }, { $set: { checkoutSessionId: checkout.id } }, { new: true });
+    if (!updated) {
+      const current = await Appointment.findById(appointment._id).select("checkoutSessionId").lean<{ checkoutSessionId?: string }>();
+      if (current?.checkoutSessionId === checkout.id) {
+        response.json({ url: checkout.url });
+        return;
+      }
+      response.status(409).json({ message: "Appointment status changed. Refresh your appointment list." });
+      return;
+    }
+    response.json({ url: checkout.url });
+  } catch {
+    response.status(502).json({ message: "Could not create Stripe Checkout. Please try again." });
+  }
+});
+
+appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, response) => {
+  if (!isValidObjectId(request.params.id)) {
+    response.status(400).json({ message: "This appointment ID is not valid." });
+    return;
+  }
+  const appointment = await Appointment.findOne({ _id: request.params.id, customerId: request.authUser!.id })
+    .select("status paymentStatus")
+    .lean<{ status: string; paymentStatus: string }>();
+  if (!appointment) {
+    response.status(404).json({ message: "Appointment not found." });
+    return;
+  }
+  response.json({ status: appointment.status, paymentStatus: appointment.paymentStatus });
 });
 
 appointmentsRouter.post("/", ...customerOnly, async (request, response) => {
@@ -152,9 +269,24 @@ adminAppointmentsRouter.patch("/:id/status", ...adminOnly, async (request, respo
     response.status(400).json({ message: "Choose confirmed or cancelled." });
     return;
   }
+  if (parsed.data.status === "cancelled") {
+    const current = await Appointment.findOne({ _id: request.params.id, status: { $in: ["pending", "confirmed"] } }).select("checkoutSessionId").lean<{ checkoutSessionId?: string }>();
+    if (current?.checkoutSessionId) {
+      try {
+        const checkout = await getStripeClient().checkout.sessions.retrieve(current.checkoutSessionId);
+        if (checkout.status !== "expired") {
+          response.status(409).json({ message: checkout.status === "complete" ? "Payment is completing. Refresh and review the payment status before cancelling." : "This appointment has an open Checkout session. Wait for it to expire before cancelling." });
+          return;
+        }
+      } catch {
+        response.status(503).json({ message: "Could not verify the active Checkout session. Try again shortly." });
+        return;
+      }
+    }
+  }
   const allowedStatus = parsed.data.status === "confirmed" ? "pending" : { $in: ["pending", "confirmed"] };
   const update = parsed.data.status === "cancelled"
-    ? { $set: { status: "cancelled" }, $unset: { slotKey: 1 } }
+    ? { $set: { status: "cancelled" }, $unset: { slotKey: 1, checkoutSessionId: 1 } }
     : { $set: { status: "confirmed" } };
   const appointment = await Appointment.findOneAndUpdate(
     { _id: request.params.id, status: allowedStatus },

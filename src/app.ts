@@ -6,6 +6,8 @@ import { servicesRouter } from "./routes/services.js";
 import { adminServicesRouter } from "./routes/admin-services.js";
 import { adminAppointmentsRouter, appointmentsRouter } from "./routes/appointments.js";
 import { adminOverviewRouter } from "./routes/admin-overview.js";
+import { stripeWebhookHandler } from "./routes/payment-webhook.js";
+import { adminTransactionsRouter } from "./routes/admin-transactions.js";
 
 export const app = express();
 
@@ -14,11 +16,14 @@ app.use(cors({
   origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
   credentials: true,
 }));
+// Stripe requires the unmodified request bytes when verifying its signature.
+app.post("/api/payments/webhook", express.raw({ type: "application/json", limit: "1mb" }), stripeWebhookHandler);
 app.use(express.json());
 
 app.use("/api/services", servicesRouter);
 app.use("/api/admin/services", adminServicesRouter);
 app.use("/api/admin/overview", adminOverviewRouter);
+app.use("/api/admin/transactions", adminTransactionsRouter);
 app.use("/api/appointments", appointmentsRouter);
 app.use("/api/admin/appointments", adminAppointmentsRouter);
 
