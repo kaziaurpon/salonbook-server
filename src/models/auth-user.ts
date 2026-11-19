@@ -5,6 +5,7 @@ export interface AuthUserRecord {
   name: string;
   email: string;
   image?: string | null;
+  phone?: string | null;
   role: "customer" | "admin";
   isBlocked: boolean;
 }
@@ -17,6 +18,7 @@ const authUserSchema = new Schema<AuthUserRecord>(
     name: { type: String, required: true },
     email: { type: String, required: true },
     image: { type: String, default: null },
+    phone: { type: String, default: null },
     role: { type: String, enum: ["customer", "admin"], default: "customer" },
     isBlocked: { type: Boolean, default: false },
   },

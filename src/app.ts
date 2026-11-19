@@ -8,6 +8,8 @@ import { adminAppointmentsRouter, appointmentsRouter } from "./routes/appointmen
 import { adminOverviewRouter } from "./routes/admin-overview.js";
 import { stripeWebhookHandler } from "./routes/payment-webhook.js";
 import { adminTransactionsRouter } from "./routes/admin-transactions.js";
+import { adminCustomersRouter } from "./routes/admin-customers.js";
+import { profileRouter } from "./routes/profile.js";
 
 export const app = express();
 
@@ -24,6 +26,8 @@ app.use("/api/services", servicesRouter);
 app.use("/api/admin/services", adminServicesRouter);
 app.use("/api/admin/overview", adminOverviewRouter);
 app.use("/api/admin/transactions", adminTransactionsRouter);
+app.use("/api/admin/customers", adminCustomersRouter);
+app.use("/api/profile", profileRouter);
 app.use("/api/appointments", appointmentsRouter);
 app.use("/api/admin/appointments", adminAppointmentsRouter);
 

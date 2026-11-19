@@ -8,8 +8,9 @@ export const adminOverviewRouter = Router();
 adminOverviewRouter.use(requireAuth, requireRole("admin"));
 
 adminOverviewRouter.get("/", async (_request, response) => {
-  const [customers, activeServices, totalAppointments, pendingAppointments, confirmedAppointments, cancelledAppointments, successfulPayments] = await Promise.all([
-    AuthUser.countDocuments({ role: { $ne: "admin" } }),
+  const [customers, blockedCustomers, activeServices, totalAppointments, pendingAppointments, confirmedAppointments, cancelledAppointments, successfulPayments] = await Promise.all([
+    AuthUser.countDocuments({ role: "customer" }),
+    AuthUser.countDocuments({ role: "customer", isBlocked: true }),
     Service.countDocuments({ status: "active" }),
     Appointment.countDocuments(),
     Appointment.countDocuments({ status: "pending" }),
@@ -17,5 +18,5 @@ adminOverviewRouter.get("/", async (_request, response) => {
     Appointment.countDocuments({ status: "cancelled" }),
     Appointment.countDocuments({ paymentStatus: "paid" }),
   ]);
-  response.json({ overview: { customers, activeServices, totalAppointments, pendingAppointments, confirmedAppointments, cancelledAppointments, successfulPayments } });
+  response.json({ overview: { customers, blockedCustomers, activeServices, totalAppointments, pendingAppointments, confirmedAppointments, cancelledAppointments, successfulPayments } });
 });
