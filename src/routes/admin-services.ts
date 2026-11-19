@@ -50,12 +50,19 @@ function validId(id: string, response: Response) {
 adminServicesRouter.use(...adminOnly);
 
 adminServicesRouter.get("/", async (request, response) => {
+  const rawPage = Number(request.query.page || 1);
+  const rawLimit = Number(request.query.limit || 12);
+  const page = Number.isFinite(rawPage) ? Math.max(Math.floor(rawPage), 1) : 1;
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 48) : 12;
   const search = typeof request.query.q === "string" ? request.query.q.trim().slice(0, 100) : "";
   const filter: Record<string, unknown> = {};
   if (request.query.status === "active" || request.query.status === "inactive") filter.status = request.query.status;
   if (search) filter.serviceName = { $regex: search.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&"), $options: "i" };
-  const services = await Service.find(filter).sort({ createdAt: -1 }).lean();
-  response.json({ services });
+  const [services, total] = await Promise.all([
+    Service.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Service.countDocuments(filter),
+  ]);
+  response.json({ services, page, limit, total, pages: Math.ceil(total / limit) });
 });
 
 adminServicesRouter.post("/upload-image", (request, response, next) => {

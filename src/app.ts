@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "./middleware/auth.js";
 import { servicesRouter } from "./routes/services.js";
 import { adminServicesRouter } from "./routes/admin-services.js";
 import { adminAppointmentsRouter, appointmentsRouter } from "./routes/appointments.js";
+import { adminOverviewRouter } from "./routes/admin-overview.js";
 
 export const app = express();
 
@@ -17,6 +18,7 @@ app.use(express.json());
 
 app.use("/api/services", servicesRouter);
 app.use("/api/admin/services", adminServicesRouter);
+app.use("/api/admin/overview", adminOverviewRouter);
 app.use("/api/appointments", appointmentsRouter);
 app.use("/api/admin/appointments", adminAppointmentsRouter);
 
