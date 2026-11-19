@@ -24,7 +24,7 @@ Requirements: Node.js 20.9 or newer, npm, MongoDB Atlas or local MongoDB, and th
 3. Set `MONGODB_URI` and `DATABASE_NAME` to the same database used by the Client's Better Auth adapter. Set `PORT=4000` and `CLIENT_ORIGIN=http://localhost:3000` for local development.
 4. Set the Better Auth verifier values to issuer/audience `http://localhost:3000` and JWKS URL `http://localhost:3000/api/auth/jwks`.
 5. Set Stripe test credentials and `IMGBB_API_KEY` to enable payments and image upload. Keep all keys in this server's ignored `.env`.
-6. Start the API with `npm run dev`. It listens on port 4000 locally; `http://localhost:4000/api/health` is the health endpoint.
+6. Start the API with `npm run dev`. It listens on port 4000 locally; `http://localhost:4000/api/health` reports whether MongoDB is connected (HTTP 503 when the database is unavailable).
 
 ## Environment variable names
 

@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import mongoose from "mongoose";
 import { requireAuth, requireRole } from "./middleware/auth.js";
 import { servicesRouter } from "./routes/services.js";
 import { adminServicesRouter } from "./routes/admin-services.js";
@@ -12,10 +13,14 @@ import { adminCustomersRouter } from "./routes/admin-customers.js";
 import { profileRouter } from "./routes/profile.js";
 
 export const app = express();
+const clientOrigin = (process.env.CLIENT_ORIGIN || "http://localhost:3000").replace(/\/$/, "");
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
+  origin: (origin, callback) => {
+    if (origin === clientOrigin) callback(null, clientOrigin);
+    else callback(null, false);
+  },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Authorization", "Content-Type"],
@@ -35,7 +40,12 @@ app.use("/api/appointments", appointmentsRouter);
 app.use("/api/admin/appointments", adminAppointmentsRouter);
 
 app.get("/api/health", (_request, response) => {
-  response.json({ status: "ok", service: "salonbook-api" });
+  const databaseReady = mongoose.connection.readyState === 1;
+  response.status(databaseReady ? 200 : 503).json({
+    status: databaseReady ? "ok" : "unavailable",
+    service: "salonbook-api",
+    database: databaseReady ? "connected" : "disconnected",
+  });
 });
 
 app.get("/api/dashboard/customer", requireAuth, requireRole("customer"), (request, response) => {
