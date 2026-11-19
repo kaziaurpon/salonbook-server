@@ -31,12 +31,24 @@ const appointmentSchema = z.object({
 });
 
 appointmentsRouter.get("/available-slots", ...customerOnly, async (request, response) => {
+  const serviceId = typeof request.query.serviceId === "string" ? request.query.serviceId : "";
+  if (!isValidObjectId(serviceId)) {
+    response.status(400).json({ message: "Choose a valid salon service first." });
+    return;
+  }
+  const serviceObjectId = new mongoose.Types.ObjectId(serviceId);
   const date = parseDate(request.query.date);
   if (!date || isPastDate(date)) {
     response.status(400).json({ message: "Choose a valid date from today onward." });
     return;
   }
+  const service = await Service.findOne({ _id: serviceObjectId, status: "active" }).select("_id").lean();
+  if (!service) {
+    response.status(404).json({ message: "This salon service is unavailable." });
+    return;
+  }
   const occupied = await Appointment.distinct("timeSlot", {
+    serviceId: serviceObjectId,
     appointmentDate: date,
     status: { $in: ["pending", "confirmed"] },
   });
@@ -64,16 +76,22 @@ appointmentsRouter.post("/", ...customerOnly, async (request, response) => {
     response.status(400).json({ message: "Choose a valid appointment date from today onward." });
     return;
   }
+  const serviceObjectId = new mongoose.Types.ObjectId(parsed.data.serviceId);
   const service = await Service.findOne({ _id: parsed.data.serviceId, status: "active" });
   if (!service) {
     response.status(404).json({ message: "This salon service is unavailable." });
     return;
   }
 
-  const slotKey = `${appointmentDate.toISOString().slice(0, 10)}:${parsed.data.timeSlot}`;
+  const slotKey = `${serviceObjectId.toString()}:${appointmentDate.toISOString().slice(0, 10)}:${parsed.data.timeSlot}`;
   try {
+    const existing = await Appointment.exists({ serviceId: serviceObjectId, appointmentDate, timeSlot: parsed.data.timeSlot, status: { $in: ["pending", "confirmed"] } });
+    if (existing) {
+      response.status(409).json({ message: "That service and time are already requested. Choose another available time." });
+      return;
+    }
     const appointment = await Appointment.create({
-      serviceId: service._id,
+      serviceId: serviceObjectId,
       customerId: request.authUser!.id,
       appointmentDate,
       timeSlot: parsed.data.timeSlot,
