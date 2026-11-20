@@ -54,8 +54,8 @@ export async function requireAuth(request: Request, response: Response, next: Ne
     const idCandidates: Array<string | mongoose.Types.ObjectId> = [id];
     if (mongoose.isValidObjectId(id)) idCandidates.push(new mongoose.Types.ObjectId(id));
     const currentUser = await AuthUser.findOne({ _id: { $in: idCandidates } }).lean<AuthUserRecord>();
-    const currentRole = currentUser?.role ?? "customer";
-    if (!currentUser || !["customer", "admin"].includes(currentRole)) {
+    const currentRole = currentUser?.role;
+    if (!currentUser || (currentRole !== "customer" && currentRole !== "admin")) {
       response.status(401).json({ message: "The account no longer exists." });
       return;
     }
