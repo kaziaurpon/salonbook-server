@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import Stripe from "stripe";
 import { getStripeClient } from "../lib/stripe.js";
-import { recordSuccessfulCheckout } from "../lib/record-stripe-payment.js";
+import { recordFailedCheckout, recordSuccessfulCheckout } from "../lib/record-stripe-payment.js";
 
 export async function stripeWebhookHandler(request: Request, response: Response) {
   const signature = request.header("stripe-signature");
@@ -23,6 +23,17 @@ export async function stripeWebhookHandler(request: Request, response: Response)
     return;
   }
 
+  if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
+    const checkout = event.data.object as Stripe.Checkout.Session;
+    try {
+      await recordFailedCheckout(checkout);
+      response.json({ received: true, recorded: "failed" });
+    } catch (error) {
+      console.error("Stripe failed-payment event processing failed.", error instanceof Error ? error.message : "Unknown error");
+      response.status(500).json({ message: "Payment event could not be recorded yet. Stripe can retry this event." });
+    }
+    return;
+  }
   if (event.type !== "checkout.session.completed") {
     response.json({ received: true, ignored: true });
     return;

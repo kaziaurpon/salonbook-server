@@ -55,3 +55,32 @@ export async function recordSuccessfulCheckout(checkout: Stripe.Checkout.Session
     await mongoSession.endSession();
   }
 }
+
+/** Records terminal unsuccessful Checkout attempts for the read-only admin ledger. */
+export async function recordFailedCheckout(checkout: Stripe.Checkout.Session) {
+  if (checkout.livemode || checkout.mode !== "payment" || checkout.currency !== "bdt" || !checkout.amount_total) {
+    throw new Error("Checkout session is not a SalonBook test payment attempt.");
+  }
+
+  const appointmentId = checkout.metadata?.appointmentId;
+  const customerId = checkout.metadata?.customerId;
+  if (!appointmentId || !mongoose.isValidObjectId(appointmentId) || !customerId || checkout.client_reference_id !== appointmentId) {
+    throw new Error("Checkout metadata is missing or invalid.");
+  }
+
+  const appointment = await Appointment.findOne({ _id: appointmentId, customerId }).select("servicePrice").lean<{ servicePrice: number }>();
+  if (!appointment || checkout.amount_total !== Math.round(appointment.servicePrice * 100)) {
+    throw new Error("Checkout amount does not match the appointment price.");
+  }
+
+  await Transaction.updateOne({ stripeSessionId: checkout.id }, {
+    $setOnInsert: {
+      appointmentId: new mongoose.Types.ObjectId(appointmentId),
+      customerId,
+      amount: checkout.amount_total / 100,
+      currency: checkout.currency,
+      stripeSessionId: checkout.id,
+      status: "failed",
+    },
+  }, { upsert: true });
+}

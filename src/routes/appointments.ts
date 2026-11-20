@@ -50,7 +50,6 @@ appointmentsRouter.get("/available-slots", ...customerOnly, async (request, resp
     return;
   }
   const occupied = await Appointment.distinct("timeSlot", {
-    serviceId: serviceObjectId,
     appointmentDate: date,
     status: { $in: ["pending", "confirmed"] },
   });
@@ -242,11 +241,11 @@ appointmentsRouter.post("/", ...customerOnly, async (request, response) => {
     return;
   }
 
-  const slotKey = `${serviceObjectId.toString()}:${appointmentDate.toISOString().slice(0, 10)}:${parsed.data.timeSlot}`;
+  const slotKey = `${appointmentDate.toISOString().slice(0, 10)}:${parsed.data.timeSlot}`;
   try {
-    const existing = await Appointment.exists({ serviceId: serviceObjectId, appointmentDate, timeSlot: parsed.data.timeSlot, status: { $in: ["pending", "confirmed"] } });
+    const existing = await Appointment.exists({ appointmentDate, timeSlot: parsed.data.timeSlot, status: { $in: ["pending", "confirmed"] } });
     if (existing) {
-      response.status(409).json({ message: "That service and time are already requested. Choose another available time." });
+      response.status(409).json({ message: "That salon time is already requested. Choose another available time." });
       return;
     }
     const appointment = await Appointment.create({
