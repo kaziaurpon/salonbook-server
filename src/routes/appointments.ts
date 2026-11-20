@@ -6,6 +6,7 @@ import { Appointment, APPOINTMENT_TIME_SLOTS } from "../models/appointment.js";
 import { Service } from "../models/service.js";
 import { AuthUser } from "../models/auth-user.js";
 import { getStripeClient } from "../lib/stripe.js";
+import { recordSuccessfulCheckout } from "../lib/record-stripe-payment.js";
 
 export const appointmentsRouter = Router();
 export const adminAppointmentsRouter = Router();
@@ -59,6 +60,27 @@ appointmentsRouter.get("/available-slots", ...customerOnly, async (request, resp
 });
 
 appointmentsRouter.get("/mine", ...customerOnly, async (request, response) => {
+  const paymentAttempts = await Appointment.find({
+    customerId: request.authUser!.id,
+    paymentStatus: "unpaid",
+    checkoutSessionId: { $exists: true },
+  }).select("checkoutSessionId").lean<{ checkoutSessionId?: string }[]>();
+  if (paymentAttempts.length) {
+    try {
+      const stripe = getStripeClient();
+      await Promise.all(paymentAttempts.map(async ({ checkoutSessionId }) => {
+        if (!checkoutSessionId) return;
+        try {
+          const checkout = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+          if (checkout.status === "complete" && checkout.payment_status === "paid") await recordSuccessfulCheckout(checkout);
+        } catch (error) {
+          console.error("Could not reconcile an appointment payment.", error instanceof Error ? error.message : "Unknown error");
+        }
+      }));
+    } catch (error) {
+      console.error("Stripe is unavailable while refreshing appointment payments.", error instanceof Error ? error.message : "Unknown error");
+    }
+  }
   const appointments = await Appointment.find({ customerId: request.authUser!.id })
     .populate("serviceId", "serviceName category image")
     .sort({ appointmentDate: -1, createdAt: -1 })
@@ -99,6 +121,11 @@ appointmentsRouter.post("/:id/checkout", ...customerOnly, async (request, respon
         return;
       }
       if (existingSession.status === "complete") {
+        if (existingSession.payment_status === "paid") {
+          await recordSuccessfulCheckout(existingSession);
+          response.json({ paymentStatus: "paid", message: "Payment confirmed. Your appointment is up to date." });
+          return;
+        }
         response.status(409).json({ message: "Payment is processing. Refresh your appointments in a moment." });
         return;
       }
@@ -173,11 +200,26 @@ appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, r
     return;
   }
   const appointment = await Appointment.findOne({ _id: request.params.id, customerId: request.authUser!.id })
-    .select("status paymentStatus")
-    .lean<{ status: string; paymentStatus: string }>();
+    .select("status paymentStatus checkoutSessionId")
+    .lean<{ status: string; paymentStatus: string; checkoutSessionId?: string }>();
   if (!appointment) {
     response.status(404).json({ message: "Appointment not found." });
     return;
+  }
+
+  // Webhooks can be delayed or unavailable during local development. Verify the
+  // existing Stripe session directly so a completed payment is reflected promptly.
+  if (appointment.paymentStatus === "unpaid" && appointment.checkoutSessionId) {
+    try {
+      const checkout = await getStripeClient().checkout.sessions.retrieve(appointment.checkoutSessionId);
+      if (checkout.status === "complete" && checkout.payment_status === "paid") {
+        await recordSuccessfulCheckout(checkout);
+        response.json({ status: appointment.status, paymentStatus: "paid" });
+        return;
+      }
+    } catch (error) {
+      console.error("Could not reconcile Stripe payment status.", error instanceof Error ? error.message : "Unknown error");
+    }
   }
   response.json({ status: appointment.status, paymentStatus: appointment.paymentStatus });
 });
