@@ -13,9 +13,11 @@ adminTransactionsRouter.get("/", async (request, response) => {
   const rawLimit = Number(request.query.limit || 12);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, Math.floor(rawLimit))) : 12;
-  const [transactions, total] = await Promise.all([
+  const [transactions, total, successful, failed] = await Promise.all([
     Transaction.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Transaction.countDocuments(),
+    Transaction.countDocuments({ status: { $in: ["paid", "succeeded"] } }),
+    Transaction.countDocuments({ status: "failed" }),
   ]);
   const appointmentIds = transactions.map((item) => item.appointmentId);
   const appointments = await Appointment.find({ _id: { $in: appointmentIds } })
@@ -34,5 +36,5 @@ adminTransactionsRouter.get("/", async (request, response) => {
     status: String(item.status) === "succeeded" ? "paid" : item.status,
     appointment: appointmentsById.get(String(item.appointmentId)) || null,
     customer: usersById.get(item.customerId) || null,
-  })), pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
+  })), totals: { total, successful, failed }, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
 });
