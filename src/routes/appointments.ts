@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 import { Appointment, APPOINTMENT_TIME_SLOTS } from "../models/appointment.js";
 import { Service } from "../models/service.js";
 import { AuthUser } from "../models/auth-user.js";
+import { Transaction } from "../models/transaction.js";
 import { getStripeClient } from "../lib/stripe.js";
 import { recordSuccessfulCheckout } from "../lib/record-stripe-payment.js";
 
@@ -199,8 +200,8 @@ appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, r
     return;
   }
   const appointment = await Appointment.findOne({ _id: request.params.id, customerId: request.authUser!.id })
-    .select("status paymentStatus checkoutSessionId")
-    .lean<{ status: string; paymentStatus: string; checkoutSessionId?: string }>();
+    .select("serviceId appointmentDate timeSlot servicePrice status paymentStatus checkoutSessionId")
+    .lean<{ _id: mongoose.Types.ObjectId; serviceId: mongoose.Types.ObjectId; appointmentDate: Date; timeSlot: string; servicePrice: number; status: string; paymentStatus: string; checkoutSessionId?: string }>();
   if (!appointment) {
     response.status(404).json({ message: "Appointment not found." });
     return;
@@ -208,19 +209,37 @@ appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, r
 
   // Webhooks can be delayed or unavailable during local development. Verify the
   // existing Stripe session directly so a completed payment is reflected promptly.
-  if (appointment.paymentStatus === "unpaid" && appointment.checkoutSessionId) {
+  let paymentStatus = appointment.paymentStatus;
+  if (paymentStatus === "unpaid" && appointment.checkoutSessionId) {
     try {
       const checkout = await getStripeClient().checkout.sessions.retrieve(appointment.checkoutSessionId);
       if (checkout.status === "complete" && checkout.payment_status === "paid") {
         await recordSuccessfulCheckout(checkout);
-        response.json({ status: appointment.status, paymentStatus: "paid" });
-        return;
+        paymentStatus = "paid";
       }
     } catch (error) {
       console.error("Could not reconcile Stripe payment status.", error instanceof Error ? error.message : "Unknown error");
     }
   }
-  response.json({ status: appointment.status, paymentStatus: appointment.paymentStatus });
+  const [service, transaction] = await Promise.all([
+    Service.findById(appointment.serviceId).select("serviceName category").lean<{ serviceName: string; category: string }>(),
+    paymentStatus === "paid"
+      ? Transaction.findOne({ appointmentId: appointment._id, customerId: request.authUser!.id, status: "paid" }).select("amount currency stripeSessionId").lean<{ amount: number; currency: string; stripeSessionId: string }>()
+      : Promise.resolve(null),
+  ]);
+  response.json({
+    status: appointment.status,
+    paymentStatus,
+    appointment: {
+      serviceName: service?.serviceName || "Salon appointment",
+      category: service?.category || "Salon service",
+      appointmentDate: appointment.appointmentDate,
+      timeSlot: appointment.timeSlot,
+      amount: transaction?.amount ?? appointment.servicePrice,
+      currency: transaction?.currency ?? "bdt",
+      stripeSessionId: transaction?.stripeSessionId ?? appointment.checkoutSessionId ?? null,
+    },
+  });
 });
 
 appointmentsRouter.post("/", ...customerOnly, async (request, response) => {
