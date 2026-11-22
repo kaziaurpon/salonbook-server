@@ -4,6 +4,7 @@ import multer from "multer";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { AuthUser } from "../models/auth-user.js";
+import { ImageStorageConfigurationError, uploadSalonImage } from "../lib/image-storage.js";
 
 export const profileRouter = Router();
 profileRouter.use(requireAuth);
@@ -51,11 +52,6 @@ profileRouter.post("/me/upload-image", (request, response, next) => {
     response.status(message.includes("File too large") ? 413 : 400).json({ message });
   });
 }, async (request, response) => {
-  const apiKey = process.env.IMGBB_API_KEY;
-  if (!apiKey) {
-    response.status(503).json({ message: "Image upload is not configured. You can still use an image URL." });
-    return;
-  }
   if (!request.file) {
     response.status(400).json({ message: "Choose an image file to upload." });
     return;
@@ -65,20 +61,11 @@ profileRouter.post("/me/upload-image", (request, response, next) => {
     return;
   }
 
-  const form = new FormData();
-  const imageBytes = new Uint8Array(request.file.buffer.byteLength);
-  imageBytes.set(request.file.buffer);
-  form.append("image", new Blob([imageBytes.buffer], { type: request.file.mimetype }), request.file.originalname);
   try {
-    const result = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(apiKey)}`, { method: "POST", body: form });
-    const payload = await result.json() as { success?: boolean; data?: { display_url?: string }; error?: { message?: string } };
-    if (!result.ok || !payload.success || !payload.data?.display_url) {
-      response.status(502).json({ message: payload.error?.message || "Image hosting did not accept the upload." });
-      return;
-    }
-    response.status(201).json({ image: payload.data.display_url, message: "Profile image uploaded. Save your profile to apply it." });
-  } catch {
-    response.status(502).json({ message: "Could not reach the image hosting service. Try an image URL instead." });
+    const image = await uploadSalonImage(request.file);
+    response.status(201).json({ image, message: "Profile image uploaded. Save your profile to apply it." });
+  } catch (error) {
+    response.status(error instanceof ImageStorageConfigurationError ? 503 : 502).json({ message: error instanceof Error ? error.message : "Could not upload the profile image. Try again." });
   }
 });
 

@@ -12,10 +12,8 @@ type SeedService = {
   sourcePage: string;
   photographer: string;
 };
-type ImageSource = Pick<SeedService, "serviceName" | "imageSource">;
-
-// Stock photographs are uploaded to the project's ImgBB account so public
-// service cards do not depend on a third-party hotlink at runtime.
+// These bundled images are served from the Client's public directory, so
+// seeded services do not depend on third-party image hosts at runtime.
 // Sources: Pexels (https://www.pexels.com/license/) and Unsplash
 // (https://unsplash.com/license/). Their source pages and photographers are
 // retained here for attribution.
@@ -112,33 +110,22 @@ const services: SeedService[] = [
   },
 ];
 
-async function uploadImage(apiKey: string, service: ImageSource): Promise<string> {
-  const imageResponse = await fetch(service.imageSource);
-  if (!imageResponse.ok) throw new Error(`Could not download the image for ${service.serviceName} (HTTP ${imageResponse.status}).`);
-  const contentType = imageResponse.headers.get("content-type") || "";
-  if (!contentType.startsWith("image/")) throw new Error(`The selected source for ${service.serviceName} did not return an image.`);
-
-  const image = await imageResponse.arrayBuffer();
-  const form = new FormData();
-  form.set("image", new Blob([image], { type: contentType }), `${service.serviceName.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}.jpg`);
-
-  const uploadResponse = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    body: form,
-  });
-  const result = await uploadResponse.json() as { success?: boolean; data?: { display_url?: string }; error?: { message?: string } };
-  const hostedUrl = result.data?.display_url;
-  if (!uploadResponse.ok || !result.success || !hostedUrl) {
-    throw new Error(`ImgBB could not accept the image for ${service.serviceName}: ${result.error?.message || `HTTP ${uploadResponse.status}`}`);
-  }
-  return hostedUrl;
-}
+const localImages: Record<string, string> = {
+  Manicure: "/images/services/manicure.jpg",
+  Pedicure: "/images/services/pedicure.jpg",
+  "Relaxing Massage": "/images/services/relaxing-massage.jpg",
+  "Haircut & Styling": "/images/services/haircut-styling.jpg",
+  "Beard Trim & Shape": "/images/services/beard-trim-shape.jpg",
+  "Hair Coloring": "/images/services/hair-coloring.jpg",
+  "Hair Treatment": "/images/services/hair-treatment.jpg",
+  "Facial & Skincare": "/images/services/facial-skincare.jpg",
+  "Bridal Makeup": "/images/services/bridal-makeup.jpg",
+  "Hair Wash": "/images/services/hair-wash.jpg",
+};
 
 async function main(): Promise<void> {
   const uri = process.env.MONGODB_URI;
-  const apiKey = process.env.IMGBB_API_KEY;
   if (!uri) throw new Error("MONGODB_URI is missing from server/.env.");
-  if (!apiKey) throw new Error("IMGBB_API_KEY is missing from server/.env.");
 
   await mongoose.connect(uri, process.env.DATABASE_NAME ? { dbName: process.env.DATABASE_NAME } : undefined);
   try {
@@ -148,16 +135,13 @@ async function main(): Promise<void> {
       const missingNames = services.filter(({ serviceName }) => !byName.has(serviceName)).map(({ serviceName }) => serviceName);
       if (missingNames.length) throw new Error(`Create the missing services before refreshing images: ${missingNames.join(", ")}.`);
       for (const service of services) {
-        const image = await uploadImage(apiKey, service);
+        const image = localImages[service.serviceName];
         await Service.updateOne({ serviceName: service.serviceName }, { $set: { image } });
         console.log(`Updated service photo: ${service.serviceName}`);
       }
       const hairWash = await Service.exists({ serviceName: "Hair Wash" });
       if (hairWash) {
-        const image = await uploadImage(apiKey, {
-          serviceName: "Hair Wash",
-          imageSource: "https://images.pexels.com/photos/33448217/pexels-photo-33448217.jpeg?auto=compress&cs=tinysrgb&w=1400",
-        });
+        const image = localImages["Hair Wash"];
         await Service.updateOne({ serviceName: "Hair Wash" }, { $set: { image } });
         console.log("Updated service photo: Hair Wash");
       }
@@ -173,7 +157,7 @@ async function main(): Promise<void> {
 
     const timestamp = Date.now();
     for (const [index, service] of missing.entries()) {
-      const image = await uploadImage(apiKey, service);
+      const image = localImages[service.serviceName];
       await Service.create({
         serviceName: service.serviceName,
         category: service.category,
