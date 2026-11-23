@@ -63,6 +63,41 @@ appointmentsRouter.get("/available-slots", ...customerOnly, async (request, resp
   });
 });
 
+appointmentsRouter.get("/payments", ...customerOnly, async (request, response) => {
+  const transactions = await Transaction.find({ customerId: request.authUser!.id, status: "paid" })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: "appointmentId",
+      select: "appointmentDate timeSlot",
+      populate: { path: "serviceId", select: "serviceName category" },
+    })
+    .lean();
+
+  const payments = transactions.map((transaction) => {
+    const appointment = transaction.appointmentId as unknown as {
+      _id: mongoose.Types.ObjectId;
+      appointmentDate?: Date;
+      timeSlot?: string;
+      serviceId?: { serviceName?: string; category?: string } | null;
+    } | null;
+    return {
+      id: String(transaction._id),
+      appointmentId: appointment ? String(appointment._id) : String(transaction.appointmentId),
+      serviceName: appointment?.serviceId?.serviceName || "Salon service",
+      category: appointment?.serviceId?.category || "Salon service",
+      appointmentDate: appointment?.appointmentDate || transaction.createdAt,
+      timeSlot: appointment?.timeSlot || "—",
+      amount: transaction.amount,
+      currency: transaction.currency,
+      paymentDate: transaction.createdAt,
+      stripeSessionId: transaction.stripeSessionId,
+      paymentStatus: transaction.status,
+    };
+  });
+
+  response.json({ payments });
+});
+
 appointmentsRouter.get("/mine", ...customerOnly, async (request, response) => {
   const paymentAttempts = await Appointment.find({
     customerId: request.authUser!.id,
@@ -228,7 +263,7 @@ appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, r
   const [service, transaction] = await Promise.all([
     Service.findById(appointment.serviceId).select("serviceName category").lean<{ serviceName: string; category: string }>(),
     paymentStatus === "paid"
-      ? Transaction.findOne({ appointmentId: appointment._id, customerId: request.authUser!.id, status: "paid" }).select("amount currency stripeSessionId").lean<{ amount: number; currency: string; stripeSessionId: string }>()
+      ? Transaction.findOne({ appointmentId: appointment._id, customerId: request.authUser!.id, status: "paid" }).select("amount currency stripeSessionId createdAt").lean<{ amount: number; currency: string; stripeSessionId: string; createdAt: Date }>()
       : Promise.resolve(null),
   ]);
   response.json({
@@ -242,6 +277,7 @@ appointmentsRouter.get("/:id/payment-status", ...customerOnly, async (request, r
       amount: transaction?.amount ?? appointment.servicePrice,
       currency: transaction?.currency ?? "bdt",
       stripeSessionId: transaction?.stripeSessionId ?? appointment.checkoutSessionId ?? null,
+      paymentDate: transaction?.createdAt ?? null,
     },
   });
 });
