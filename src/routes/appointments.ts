@@ -122,7 +122,7 @@ appointmentsRouter.get("/mine", ...customerOnly, async (request, response) => {
   }
   const appointments = await Appointment.find({ customerId: request.authUser!.id })
     .populate("serviceId", "serviceName category image")
-    .sort({ appointmentDate: -1, createdAt: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .lean();
   response.json({ appointments });
 });
