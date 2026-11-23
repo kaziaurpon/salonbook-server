@@ -26,6 +26,10 @@ function isPastDate(date: Date) {
   return date < today;
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const appointmentSchema = z.object({
   serviceId: z.string().refine(isValidObjectId, "Invalid service ID."),
   appointmentDate: z.string(),
@@ -310,18 +314,38 @@ adminAppointmentsRouter.get("/", ...adminOnly, async (request, response) => {
   const rawLimit = Number(request.query.limit || 10);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const limit = Number.isFinite(rawLimit) ? Math.min(30, Math.max(1, Math.floor(rawLimit))) : 10;
-  const [appointments, total, pending, confirmed, cancelled] = await Promise.all([
-    Appointment.find()
-      .populate("serviceId", "serviceName category image")
-      .sort({ appointmentDate: -1, createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean(),
+  const query = typeof request.query.q === "string" ? request.query.q.trim().slice(0, 100) : "";
+  const requestedSort = typeof request.query.sort === "string" ? request.query.sort : "latest";
+  const sort = ["latest", "oldest", "appointment", "price-desc", "price-asc"].includes(requestedSort) ? requestedSort : "latest";
+  const filter: Record<string, unknown> = {};
+  if (query) {
+    const matcher = new RegExp(escapeRegex(query), "i");
+    const matchedCustomers = await AuthUser.find({ $or: [{ name: matcher }, { email: matcher }] }).select("_id").lean();
+    filter.customerId = { $in: matchedCustomers.map((customer) => String(customer._id)) };
+  }
+  const [total, pending, confirmed, cancelled, filteredTotal] = await Promise.all([
     Appointment.countDocuments(),
     Appointment.countDocuments({ status: "pending" }),
     Appointment.countDocuments({ status: "confirmed" }),
     Appointment.countDocuments({ status: "cancelled" }),
+    Appointment.countDocuments(filter),
   ]);
+  const sortBy: Record<string, 1 | -1> = sort === "oldest" ? { createdAt: 1 } : sort === "price-desc" ? { servicePrice: -1 } : sort === "price-asc" ? { servicePrice: 1 } : { createdAt: -1 };
+  let appointments;
+  if (sort === "appointment") {
+    const timeOrder = new Map(APPOINTMENT_TIME_SLOTS.map((timeSlot, index) => [timeSlot, index]));
+    const matchingAppointments = await Appointment.find(filter).populate("serviceId", "serviceName category image").lean();
+    matchingAppointments.sort((left, right) => new Date(left.appointmentDate).getTime() - new Date(right.appointmentDate).getTime()
+      || (timeOrder.get(left.timeSlot) ?? 0) - (timeOrder.get(right.timeSlot) ?? 0));
+    appointments = matchingAppointments.slice((page - 1) * limit, page * limit);
+  } else {
+    appointments = await Appointment.find(filter)
+      .populate("serviceId", "serviceName category image")
+      .sort(sortBy)
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+  }
   const ids = [...new Set(appointments.map((appointment) => appointment.customerId))];
   const idCandidates = ids.flatMap((id) => mongoose.isValidObjectId(id)
     ? [id, new mongoose.Types.ObjectId(id)]
@@ -330,7 +354,7 @@ adminAppointmentsRouter.get("/", ...adminOnly, async (request, response) => {
   const usersById = new Map(users.map((user) => [String(user._id), { id: String(user._id), name: user.name, email: user.email, image: user.image }]));
   response.json({
     appointments: appointments.map((appointment) => ({ ...appointment, customer: usersById.get(appointment.customerId) || null })),
-    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    pagination: { page, limit, total: filteredTotal, pages: Math.max(1, Math.ceil(filteredTotal / limit)) },
     totals: { total, pending, confirmed, cancelled },
   });
 });
